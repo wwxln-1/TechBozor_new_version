@@ -11,6 +11,7 @@ kod ikkalasida ham bir xil ishlaydi.
 """
 import random
 import datetime
+import os
 from faker import Faker
 
 fake = Faker()
@@ -19,7 +20,10 @@ random.seed(7)
 def get_client():
     try:
         from pymongo import MongoClient
-        client = MongoClient("mongodb://localhost:27017", serverSelectionTimeoutMS=1000)
+        client = MongoClient(
+            os.getenv("MONGODB_URI", "mongodb://localhost:27017"),
+            serverSelectionTimeoutMS=1000,
+        )
         client.server_info()  # ulanishni tekshirish
         print("✅ Haqiqiy MongoDB serverga ulandi")
         return client

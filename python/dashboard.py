@@ -9,6 +9,7 @@ Ishga tushirish:
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import psycopg2
@@ -30,36 +31,74 @@ def get_mongo_db():
 
 @st.cache_data
 def load_orders():
-    conn = psycopg2.connect(host="localhost", dbname="techbozor", user="postgres", password="1234")
-    df = pd.read_sql(
-        """
-        SELECT o.order_id, o.customer_id, o.order_date, o.status,
-               c.city, c.full_name,
-               SUM(oi.quantity * oi.unit_price) AS order_value,
-               SUM(oi.quantity) AS total_items
-        FROM orders o
-        JOIN customers c ON c.customer_id = o.customer_id
-        JOIN order_items oi ON oi.order_id = o.order_id
-        WHERE o.status = 'completed'
-        GROUP BY o.order_id, o.customer_id, o.order_date, o.status, c.city, c.full_name
-        """,
-        conn,
-    )
-    cat_df = pd.read_sql(
-        """
-        SELECT c.category_name, SUM(oi.quantity * oi.unit_price) AS revenue,
-               SUM(oi.quantity) AS units_sold
-        FROM categories c
-        JOIN products p ON p.category_id = c.category_id
-        JOIN order_items oi ON oi.product_id = p.product_id
-        JOIN orders o ON o.order_id = oi.order_id
-        WHERE o.status = 'completed'
-        GROUP BY c.category_name
-        ORDER BY revenue DESC
-        """,
-        conn,
-    )
-    conn.close()
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        try:
+            database_url = st.secrets["DATABASE_URL"]
+        except (KeyError, FileNotFoundError):
+            database_url = None
+
+    try:
+        if database_url:
+            conn = psycopg2.connect(database_url)
+        else:
+            conn = psycopg2.connect(
+                host=os.getenv("PGHOST", "localhost"),
+                port=os.getenv("PGPORT", "5432"),
+                dbname=os.getenv("PGDATABASE", "techbozor"),
+                user=os.getenv("PGUSER", "postgres"),
+                password=os.getenv("PGPASSWORD", "1234"),
+            )
+        df = pd.read_sql(
+            """
+            SELECT o.order_id, o.customer_id, o.order_date, o.status,
+                   c.city, c.full_name,
+                   SUM(oi.quantity * oi.unit_price) AS order_value,
+                   SUM(oi.quantity) AS total_items
+            FROM orders o
+            JOIN customers c ON c.customer_id = o.customer_id
+            JOIN order_items oi ON oi.order_id = o.order_id
+            WHERE o.status = 'completed'
+            GROUP BY o.order_id, o.customer_id, o.order_date, o.status, c.city, c.full_name
+            """,
+            conn,
+        )
+        cat_df = pd.read_sql(
+            """
+            SELECT c.category_name, SUM(oi.quantity * oi.unit_price) AS revenue,
+                   SUM(oi.quantity) AS units_sold
+            FROM categories c
+            JOIN products p ON p.category_id = c.category_id
+            JOIN order_items oi ON oi.product_id = p.product_id
+            JOIN orders o ON o.order_id = oi.order_id
+            WHERE o.status = 'completed'
+            GROUP BY c.category_name
+            ORDER BY revenue DESC
+            """,
+            conn,
+        )
+        conn.close()
+    except psycopg2.Error:
+        st.info("PostgreSQL topilmadi. Demo ma'lumotlar bilan dashboard ishga tushdi.")
+        rng = np.random.default_rng(42)
+        count = 594
+        cities = ["Toshkent", "Samarqand", "Andijon", "Buxoro", "Namangan", "Farg'ona", "Nukus", "Qarshi"]
+        categories = ["Smartfonlar", "Noutbuklar", "Aksessuarlar", "Audio texnika", "Planshetlar"]
+        df = pd.DataFrame({
+            "order_id": np.arange(1, count + 1),
+            "customer_id": rng.integers(1, 181, count),
+            "order_date": pd.to_datetime("2024-01-01") + pd.to_timedelta(rng.integers(0, 430, count), unit="D"),
+            "status": "completed",
+            "city": rng.choice(cities, count),
+            "full_name": [f"Mijoz {value}" for value in rng.integers(1, 181, count)],
+            "order_value": rng.gamma(3.0, 260.0, count).round(2),
+            "total_items": rng.integers(1, 6, count),
+        })
+        cat_df = pd.DataFrame({
+            "category_name": categories,
+            "revenue": rng.integers(18000, 95000, len(categories)),
+            "units_sold": rng.integers(100, 600, len(categories)),
+        }).sort_values("revenue", ascending=False)
     df["order_date"] = pd.to_datetime(df["order_date"])
     return df, cat_df
 
